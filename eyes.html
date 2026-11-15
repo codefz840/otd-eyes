@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tablet Eyes</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  svg { display: block; width: 100vw; height: 100vh; }
+  #status {
+    position: fixed; left: 8px; top: 8px; font: 14px/1.3 monospace;
+    color: #fff; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 4px;
+    display: none; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<!-- Geometry and colours measured from eyes_1f440.png (Twemoji 👀, CC-BY 4.0). -->
+<svg id="eyes" viewBox="0 0 500 500" preserveAspectRatio="xMidYMid meet">
+  <ellipse cx="124.5" cy="249.5" rx="112" ry="132" fill="#E1E8ED"/>
+  <ellipse cx="374.5" cy="249.5" rx="112" ry="132" fill="#E1E8ED"/>
+  <circle id="pl" cx="124.5" cy="249.5" r="39" fill="#292F33"/>
+  <circle id="pr" cx="374.5" cy="249.5" r="39" fill="#292F33"/>
+</svg>
+<div id="status"></div>
+<script>
+"use strict";
+// ---- options (URL query) ------------------------------------------------------
+// mode=prop   pupils move proportionally to the pen inside the OTD area (default)
+// mode=xeyes  classic xeyes: pupils look at the pen as if the eyes sat at (ex,ey)
+//             on the play area; size = eyes width as a fraction of the area width,
+//             aspect = area height / width (16:9 screen -> 0.5625)
+// gain=1      prop mode: >1 reaches the edge of the eye sooner
+// smooth=0    0 = raw (lowest latency) .. 0.95 = very smooth
+// idle=stay   when the pen leaves the tablet: stay | center
+// cross=0.9   prop mode: how far the pupils pull toward the nose at the centre (0 = off)
+// crossr=0.12 prop mode: radius of the cross-eyed zone (fraction of the area width)
+// debug=1     show connection / position overlay
+const q = new URLSearchParams(location.search);
+const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
+const opt = {
+  mode: q.get("mode") || "prop",
+  gain: num("gain", 1),
+  smooth: Math.min(Math.max(num("smooth", 0), 0), 0.99),
+  idle: q.get("idle") || "stay",
+  cross: num("cross", 0.9), crossr: num("crossr", 0.12),
+  ex: num("ex", 0.5), ey: num("ey", 1.15), size: num("size", 0.15), aspect: num("aspect", 0.5625),
+  debug: q.get("debug") === "1",
+  ws: q.get("ws") || `ws://${location.host || "127.0.0.1:8765"}/ws`,
+};
+
+const EYES = [
+  { cx: 124.5, cy: 249.5, el: document.getElementById("pl") },
+  { cx: 374.5, cy: 249.5, el: document.getElementById("pr") },
+];
+const AX = 112 - 39 - 4, AY = 132 - 39 - 4;   // pupil travel ellipse (white minus pupil minus margin)
+
+// Point (dx,dy) relative to an eye centre -> clamped onto the travel ellipse.
+function clampEllipse(dx, dy) {
+  const k = Math.hypot(dx / AX, dy / AY);
+  return k > 1 ? [dx / k, dy / k] : [dx, dy];
+}
+
+function targetFor(eye, u, v) {
+  if (opt.mode === "xeyes") {
+    const s = 500 / opt.size;                       // svg units per area width
+    const tx = 250 + (u - opt.ex) * s;
+    const ty = 250 + (v - opt.ey) * opt.aspect * s;
+    return clampEllipse(tx - eye.cx, ty - eye.cy);
+  }
+  let dx = (u - 0.5) * 2 * opt.gain * AX, dy = (v - 0.5) * 2 * opt.gain * AY;
+  // Cross-eyed near the centre: pupils pull toward the nose as the pen nears (0.5, 0.5).
+  if (opt.cross > 0 && opt.crossr > 0) {
+    const d = Math.hypot(u - 0.5, (v - 0.5) * opt.aspect) / opt.crossr;
+    if (d < 1) {
+      const s = 1 - d * d * (3 - 2 * d);            // smoothstep falloff: 1 at centre, 0 at edge
+      const toNose = eye.cx < 250 ? 1 : -1;
+      dx += toNose * opt.cross * AX * s;
+    }
+  }
+  return clampEllipse(dx, dy);
+}
+
+let pen = null;          // {u,v} or null when out of range
+const cur = EYES.map(() => [0, 0]);
+let last = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const k = opt.smooth ? 1 - Math.pow(opt.smooth, dt * 60) : 1;
+  EYES.forEach((eye, i) => {
+    let t;
+    if (pen) t = targetFor(eye, pen.u, pen.v);
+    else if (opt.idle === "center") t = [0, 0];
+    else t = cur[i];
+    const c = cur[i];
+    c[0] += (t[0] - c[0]) * k;
+    c[1] += (t[1] - c[1]) * k;
+    eye.el.setAttribute("cx", (eye.cx + c[0]).toFixed(2));
+    eye.el.setAttribute("cy", (eye.cy + c[1]).toFixed(2));
+  });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- connection --------------------------------------------------------------
+const statusEl = document.getElementById("status");
+let state = { ws: false, otd: null };
+function showStatus() {
+  if (!opt.debug) return;
+  statusEl.style.display = "block";
+  statusEl.textContent =
+    `ws: ${state.ws ? "ok" : "disconnected"}  otd: ${state.otd === null ? "?" : state.otd ? "ok" : "down"}\n` +
+    (pen ? `u=${pen.u.toFixed(3)} v=${pen.v.toFixed(3)}` : "pen: out of range");
+}
+
+function connect() {
+  const ws = new WebSocket(opt.ws);
+  ws.onopen = () => { state.ws = true; showStatus(); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.t === "pos") { pen = { u: m.u, v: m.v }; state.otd = true; }
+    else if (m.t === "out") pen = null;
+    else if (m.t === "status") { state.otd = m.otd; if (!m.otd) pen = null; }
+    showStatus();
+  };
+  ws.onclose = () => { state.ws = false; pen = null; showStatus(); setTimeout(connect, 1000); };
+}
+showStatus();
+connect();
+</script>
+</body>
+</html>
