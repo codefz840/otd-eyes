@@ -87,6 +87,20 @@ evdev-otd / otd-rpc / evdev-tablet / cursor ─> Hub ─(WebSocket)─> OBS Brow
 go test ./...     # 單元測試
 ```
 
+## GitHub 自動建置
+
+推送到任何分支或開 PR 時，[`.github/workflows/build.yml`](.github/workflows/build.yml) 會：
+
+1. 在 Linux 和 Windows 上跑 `go vet` 和 `go test`
+2. 編出兩個執行檔，放在該次執行的 **Artifacts**（Actions 頁面 → 點那次執行 → 最下方下載）
+
+推送 `v` 開頭的 tag 會另外建立 GitHub Release，附上兩個執行檔：
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 ## 開機自動啟動
 
 Linux（systemd user）：
