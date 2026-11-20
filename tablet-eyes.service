@@ -1,9 +1,9 @@
 [Unit]
-Description=Tablet Eyes bridge (OpenTabletDriver -> OBS browser source)
+Description=Tablet Eyes (OpenTabletDriver -> OBS browser source)
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/python3 -u %h/workspace/eyes/eyes_bridge.py
+ExecStart=%h/.local/bin/tablet-eyes
 Restart=on-failure
 RestartSec=3
 

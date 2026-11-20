@@ -105,12 +105,12 @@ requestAnimationFrame(frame);
 
 // ---- connection --------------------------------------------------------------
 const statusEl = document.getElementById("status");
-let state = { ws: false, otd: null };
+let state = { ws: false, ok: null, source: null };
 function showStatus() {
   if (!opt.debug) return;
   statusEl.style.display = "block";
   statusEl.textContent =
-    `ws: ${state.ws ? "ok" : "disconnected"}  otd: ${state.otd === null ? "?" : state.otd ? "ok" : "down"}\n` +
+    `ws: ${state.ws ? "ok" : "disconnected"}  source: ${state.source || "?"} ${state.ok === null ? "" : state.ok ? "ok" : "down"}\n` +
     (pen ? `u=${pen.u.toFixed(3)} v=${pen.v.toFixed(3)}` : "pen: out of range");
 }
 
@@ -119,9 +119,9 @@ function connect() {
   ws.onopen = () => { state.ws = true; showStatus(); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.t === "pos") { pen = { u: m.u, v: m.v }; state.otd = true; }
+    if (m.t === "pos") { pen = { u: m.u, v: m.v }; state.ok = true; }
     else if (m.t === "out") pen = null;
-    else if (m.t === "status") { state.otd = m.otd; if (!m.otd) pen = null; }
+    else if (m.t === "status") { state.ok = m.ok; state.source = m.source; if (!m.ok) pen = null; }
     showStatus();
   };
   ws.onclose = () => { state.ws = false; pen = null; showStatus(); setTimeout(connect, 1000); };
